@@ -1,0 +1,59 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    # Runs daily at 06:00 UTC (17:00 AEST)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/obra/superpowers.git
+          git fetch upstream
+
+      - name: Check for changes
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            echo "already_synced=true" >> $GITHUB_OUTPUT
+            echo "✅ Already up to date"
+          else
+            echo "already_synced=false" >> $GITHUB_OUTPUT
+            echo "🔄 Changes detected, will sync"
+          fi
+
+      - name: Create snapshot tag before sync
+        if: steps.check.outputs.already_synced == 'false'
+        run: |
+          TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
+          TAG="pre-sync-${TIMESTAMP}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "📌 Created snapshot tag: $TAG"
+
+      - name: Merge upstream changes
+        if: steps.check.outputs.already_synced == 'false'
+        run: |
+          git merge upstream/main --no-edit
+          git push origin main
+          echo "✅ Successfully synced with upstream"
